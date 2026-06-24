@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>萌趣像素画工坊｜Canvas创作系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "微软雅黑", sans-serif;
+        }
+        body {
+            background-color: #FFF0F6;
+            padding: 30px;
+        }
+        .main-wrap {
+            display: flex;
+            gap: 25px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .tool-panel {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 20px;
+            box-shadow: 0 4px 12px #ffbcd4;
+            width: 280px;
+        }
+        .tool-panel h3 {
+            text-align: center;
+            color: #ff6699;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .block {
+            background: #fff5f9;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        .block p {
+            font-size: 14px;
+            color: #555;
+            margin-bottom:8px;
+        }
+        button {
+            padding: 7px 9px;
+            margin: 4px 2px;
+            border: none;
+            border-radius: 30px;
+            background: #ff88bb;
+            color: white;
+            font-size:13px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #ff5599;
+            transform: scale(1.05);
+        }
+        input[type="number"] {
+            width:75px;
+            padding:6px;
+            border-radius:8px;
+            border:1px solid #ffc2d9;
+        }
+        input[type="color"] {
+            width:100%;
+            height:45px;
+            border-radius:10px;
+            border:none;
+            cursor:pointer;
+        }
+        #file-input{
+            display: none;
+        }
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap:5px;
+        }
+        .color-item {
+            height:26px;
+            border-radius:6px;
+            border: 1px solid #ddd;
+            cursor:pointer;
+        }
+        .canvas-wrap {
+            background: #fff;
+            padding:20px;
+            border-radius:20px;
+            box-shadow: 0 4px 12px #ffbcd4;
+        }
+        canvas {
+            border: 2px solid #ffb3cc;
+            cursor: crosshair;
+            border-radius:8px;
+        }
+    </style>
+</head>
+<body>
+<div class="main-wrap">
+    <div class="tool-panel">
+        <h3>🎨 像素画工具箱</h3>
+        <div class="block">
+            <p>📐 画布设置（修改数字点新建）</p>
+            宽度：<input id="inputW" type="number" value="32" min="8" max="64">
+            高度：<input id="inputH" type="number" value="32" min="8" max="64">
+            <br><br>
+            <button onclick="createCanvas()">新建画布</button>
+            <button onclick="toggleGrid()">隐藏/显示网格</button>
+            <button onclick="bgTransparent()">透明背景</button>
+        </div>
+        <div class="block">
+            <p>✏️ 绘图工具</p>
+            <button onclick="setTool('pen')">画笔</button>
+            <button onclick="setTool('eraser')">橡皮</button>
+            <button onclick="setTool('fill')">油漆桶</button>
+            <button onclick="setTool('picker')">取色器</button>
+            <br>
+            <button onclick="setTool('line')">直线</button>
+            <button onclick="setTool('rect')">矩形</button>
+        </div>
+        <div class="block">
+            <p>🖼️ 图片处理</p>
+            <input type="file" id="file-input" accept="image/*">
+            <button onclick="document.getElementById('file-input').click()">导入图片生成像素画</button>
+        </div>
+        <div class="block">
+            <p>⏪ 操作记录</p>
+            <button onclick="undoAction()">撤销</button>
+            <button onclick="redoAction()">重做</button>
+            <button onclick="clearCanvas()">一键清空</button>
+        </div>
+        <div class="block">
+            <p>🌈 颜色选择</p>
+            <input type="color" id="colorPicker" value="#000000">
+            <div class="color-grid" id="colorBoard"></div>
+        </div>
+        <div class="block">
+            <button onclick="downloadPic()" style="width:100%;">💾 导出PNG图片</button>
+        </div>
+    </div>
+    <div class="canvas-wrap">
+        <canvas id="pixelCanvas"></canvas>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("pixelCanvas");
+const ctx = canvas.getContext("2d");
+const fileInput = document.getElementById('file-input');
+
+let cellSize = 16;
+let currentTool = "pen";
+let mainColor = "#000000";
+let bgColor = "#ffffff";
+let mouseDown = false;
+let gridVisible = true;
+let bgIsTransparent = false;
+let startX = 0, startY = 0;
+let tempCanvasData = null;
+
+let historyStack = [];
+let historyPointer = -1;
+
+const colorList = [
+    "#000000", "#ffffff", "#ff7799", "#ffccdd",
+    "#ffdd77", "#88ddaa", "#77ccf2", "#b399ff",
+    "#ff9966", "#996655", "#777777", "#dddddd"
+];
+
+function initColorPanel() {
+    const board = document.getElementById("colorBoard");
+    board.innerHTML = "";
+    colorList.forEach(c => {
+        let div = document.createElement("div");
+        div.className = "color-item";
+        div.style.backgroundColor = c;
+        div.onclick = () => {
+            mainColor = c;
+            document.getElementById("colorPicker").value = c;
+        };
+        board.appendChild(div);
+    })
+}
+
+function createCanvas() {
+    let w = Math.min(64, Math.max(8, parseInt(document.getElementById("inputW").value)));
+    let h = Math.min(64, Math.max(8, parseInt(document.getElementById("inputH").value)));
+    canvas.width = w * cellSize;
+    canvas.height = h * cellSize;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (!bgIsTransparent) {
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    drawGrid();
+    historyStack = [];
+    historyPointer = -1;
+    saveState();
+}
+
+function drawGrid() {
+    if (!gridVisible) return;
+    ctx.strokeStyle = "#ffc2d9";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= canvas.width; x += cellSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += cellSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+}
+
+function toggleGrid() {
+    gridVisible = !gridVisible;
+    redrawCanvas();
+}
+
+function bgTransparent() {
+    bgIsTransparent = !bgIsTransparent;
+    createCanvas();
+}
+
+function setTool(tool) {
+    currentTool = tool;
+    if (tool === "eraser") {
+        mainColor = bgColor;
+    }else{
+        mainColor = document.getElementById("colorPicker").value;
+    }
+}
+
+function saveState() {
+    historyPointer++;
+    historyStack.splice(historyPointer);
+    historyStack.push(canvas.toDataURL("image/png"));
+}
+
+function undoAction() {
+    if (historyPointer <= 0) return;
+    historyPointer--;
+    restoreImage();
+}
+
+function redoAction() {
+    if (historyPointer >= historyStack.length - 1) return;
+    historyPointer++;
+    restoreImage();
+}
+
+function restoreImage() {
+    let img = new Image();
+    img.src = historyStack[historyPointer];
+    img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        drawGrid();
+    }
+}
+
+function clearCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!bgIsTransparent) {
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    drawGrid();
+    saveState();
+}
+
+function redrawCanvas(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(tempCanvasData){
+        ctx.drawImage(tempCanvasData,0,0);
+    }
+    drawGrid();
+}
+
+function getCellPosition(e) {
+    let rect = canvas.getBoundingClientRect();
+    let px = Math.floor((e.clientX - rect.left) / cellSize) * cellSize;
+    let py = Math.floor((e.clientY - rect.top) / cellSize) * cellSize;
+    return { x: px, y: py };
+}
+
+function drawPixel(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, cellSize - 1, cellSize - 1);
+    drawGrid();
+}
+
+function rgbToHex(r, g, b) {
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+//油漆桶填充
+function floodFill(startX, startY) {
+    const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const data = imgData.data;
+    const targetR = data[(startY * canvas.width + startX) * 4];
+    const targetG = data[(startY * canvas.width + startX) * 4 + 1];
+    const targetB = data[(startY * canvas.width + startX) * 4 + 2];
+
+    const fillR = parseInt(mainColor.slice(1,3),16);
+    const fillG = parseInt(mainColor.slice(3,5),16);
+    const fillB = parseInt(mainColor.slice(5,7),16);
+
+    if(targetR===fillR && targetG===fillG && targetB===fillB) return;
+
+    let stack = [[startX, startY]];
+    while(stack.length>0){
+        let [x,y] = stack.pop();
+        let index = (y * canvas.width + x)*4;
+        if(x<0||x>=canvas.width||y<0||y>=canvas.height) continue;
+        if(data[index]!==targetR || data[index+1]!==targetG || data[index+2]!==targetB) continue;
+
+        data[index]=fillR;
+        data[index+1]=fillG;
+        data[index+2]=fillB;
+
+        stack.push([x+cellSize,y]);
+        stack.push([x-cellSize,y]);
+        stack.push([x,y+cellSize]);
+        stack.push([x,y-cellSize]);
+    }
+    ctx.putImageData(imgData,0,0);
+    drawGrid();
+    saveState();
+}
+
+canvas.onmousedown = function (e) {
+    mouseDown = true;
+    let pos = getCellPosition(e);
+    startX = pos.x;
+    startY = pos.y;
+    tempCanvasData = new Image();
+    tempCanvasData.src = canvas.toDataURL("image/png");
+
+    if (currentTool === "pen" || currentTool === "eraser") {
+        drawPixel(pos.x, pos.y, mainColor);
+    }
+    if (currentTool === "picker") {
+        let data = ctx.getImageData(pos.x + 2, pos.y + 2, 1, 1).data;
+        mainColor = rgbToHex(data[0], data[1], data[2]);
+        document.getElementById("colorPicker").value = mainColor;
+    }
+    if(currentTool === "fill"){
+        floodFill(pos.x,pos.y);
+    }
+}
+
+canvas.onmousemove = function (e) {
+    if (!mouseDown) return;
+    let pos = getCellPosition(e);
+
+    if (currentTool === "pen" || currentTool === "eraser") {
+        drawPixel(pos.x, pos.y, mainColor);
+        return;
+    }
+    if(currentTool === "line"){
+        redrawCanvas();
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(startX,startY);
+        ctx.lineTo(pos.x,pos.y);
+        ctx.stroke();
+        drawGrid();
+    }
+    if(currentTool === "rect"){
+        redrawCanvas();
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, startY, pos.x-startX, pos.y-startY);
+        drawGrid();
+    }
+}
+
+canvas.onmouseup = function (e) {
+    if (!mouseDown) return;
+    mouseDown = false;
+    let pos = getCellPosition(e);
+
+    if(currentTool === "line"){
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(startX,startY);
+        ctx.lineTo(pos.x,pos.y);
+        ctx.stroke();
+        drawGrid();
+    }
+    if(currentTool === "rect"){
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, startY, pos.x-startX, pos.y-startY);
+        drawGrid();
+    }
+    saveState();
+}
+
+// ============重点优化：像素化算法【一格一纯色，无颜色溢出】============
+fileInput.onchange = function(e){
+    let file = e.target.files[0];
+    if(!file) return;
+    let reader = new FileReader();
+    reader.onload = function(event){
+        let img = new Image();
+        img.src = event.target.result;
+        img.onload = function(){
+            // 临时画布，用来读取原图像素，不直接画在主画布
+            const tempCanvas = document.createElement("canvas");
+            const tempCtx = tempCanvas.getContext("2d");
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            tempCtx.drawImage(img,0,0,canvas.width,canvas.height);
+            const imgData = tempCtx.getImageData(0,0,canvas.width,canvas.height);
+            const data = imgData.data;
+
+            // 清空主画布
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            if(!bgIsTransparent){
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(0,0,canvas.width,canvas.height);
+            }
+
+            // 逐单元格计算平均颜色，整块填充，杜绝混色
+            for(let gridX = 0; gridX < canvas.width; gridX += cellSize){
+                for(let gridY = 0; gridY < canvas.height; gridY += cellSize){
+                    let totalR = 0, totalG = 0, totalB = 0;
+                    let count = 0;
+                    //遍历当前格子内所有像素，取平均值
+                    for(let px = gridX; px < gridX + cellSize; px++){
+                        for(let py = gridY; py < gridY + cellSize; py++){
+                            let idx = (py * canvas.width + px) * 4;
+                            totalR += data[idx];
+                            totalG += data[idx+1];
+                            totalB += data[idx+2];
+                            count++;
+                        }
+                    }
+                    //平均值作为当前格子唯一颜色
+                    let r = Math.round(totalR / count);
+                    let g = Math.round(totalG / count);
+                    let b = Math.round(totalB / count);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    //填满整个单元格，不留缝隙
+                    ctx.fillRect(gridX, gridY, cellSize, cellSize);
+                }
+            }
+
+            drawGrid();
+            saveState();
+        }
+    }
+    reader.readAsDataURL(file);
+}
+
+function downloadPic() {
+    let a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = "萌趣像素画_" + Date.now() + ".png";
+    a.click();
+}
+
+window.onload = function () {
+    initColorPanel();
+    createCanvas();
+}
+</script>
+</body>
+</html>
